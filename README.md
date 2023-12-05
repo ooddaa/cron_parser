@@ -7,7 +7,7 @@
 ### 1. The usual way 
 
 Depending on your OS, installing Elixir should be straightforward. 
-Please refer to the [official Erlang Installation page](https://elixir-lang.org/install.html)
+Please refer to the [official Elixir Installation page](https://elixir-lang.org/install.html)
 
 ### 2. The delightful way 
 
