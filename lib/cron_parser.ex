@@ -1,106 +1,141 @@
 defmodule CronParser do
   @moduledoc """
-  Documentation for `CronParser`.
+  The best place to start navigating the module's
+  functionality is to look at tests. 
+
+  Main function `parser\1` expects a valid cron
+  command and outputs a map with all expansions.
+
+  It consumes cron string greedily, returning 
+  first error that it encounters. 
+
+  Validations on input are: 
+  - must have valid length
+  - must contain only valid tokens (0-9 * / - ,)
   """
+
+  @keys [
+    "minutes",
+    "hours",
+    "days",
+    "months",
+    "weekdays",
+    "cmd"
+  ]
+
 
   @doc """
+  Main function.  
+  
+  Result %{
+    "minutes" => list(integer()),
+    "hours" => list(integer()),
+    "days" => list(integer()),
+    "months" => list(integer()),
+    "weekdays" => list(integer()),
+    "cmd" => list(String.t())
+  }
+  @return {:ok, Result} | {:error, reason, input}
   """
-  def parse_to_ast(input) when is_binary(input) do
-    case validate_input(input) do
-      true ->
-        with {:ok, minutes, rest} <- parse_minutes(input),
-             {:ok, hours, rest} <- parse_hours(rest),
-             {:ok, days, rest} <- parse_days(rest),
-             {:ok, months, rest} <- parse_months(rest),
-             {:ok, weekdays, rest} <- parse_weekdays(rest),
-             {:ok, cmd, nil} <- parse_cmd(rest) do
-          %{
-            "minutes" => minutes,
-            "hours" => hours,
-            "days" => days,
-            "months" => months,
-            "weekdays" => weekdays,
-            "cmd" => cmd
-          }
-        end
-
-      false ->
-        {:error, :bad_input, input}
+  def parser(input) when is_binary(input) do
+      with {:ok, input} <- is_long?(input),
+           {:ok, input} <- has_valid_tokens?(input),
+           {:ok, minutes, rest} <- parse_with(input, &minute/1),
+           {:ok, hours, rest} <- parse_with(rest, &hour/1),
+           {:ok, days, rest} <- parse_with(rest, &day/1),
+           {:ok, months, rest} <- parse_with(rest, &month/1),
+           {:ok, weekdays, rest} <- parse_with(rest, &weekday/1),
+           {:ok, cmd, nil} <- parse_with(rest, &cmd/1) do
+      {:ok,
+       %{
+         "minutes" => minutes,
+         "hours" => hours,
+         "days" => days,
+         "months" => months,
+         "weekdays" => weekdays,
+         "cmd" => cmd
+       }}
     end
   end
 
-  def parse_to_ast(input), do: {:error, :bad_input, input}
+  def parser(input), do: {:error, :bad_input, input}
 
-  def parse_minutes(input) do
-    [input, rest] = String.split(input, " ", parts: 2)
-    minutes = process(input, &minute/1)
-    {:ok, minutes, rest}
+  defp parse_with(input, parser) do
+    case String.split(input, " ", parts: 2) do
+      [cmd] -> {:ok, process(cmd, parser), nil}
+      [input, rest] -> {:ok, process(input, parser), rest} 
+    end
   end
 
+  ##
+  # Parsers 
+  ##
   defp minute("*"), do: {0, 59, 1}
   defp minute(input), do: parse(input, &minute/1)
-
-  def parse_hours(input) do
-    [input, rest] = String.split(input, " ", parts: 2)
-    hours = process(input, &hour/1)
-    {:ok, hours, rest}
-  end
 
   defp hour("*"), do: {0, 23, 1}
   defp hour(input), do: parse(input, &hour/1)
 
-  def parse_days(input) do
-    [input, rest] = String.split(input, " ", parts: 2)
-    days = process(input, &day/1)
-    {:ok, days, rest}
-  end
-
   defp day("*"), do: {1, 31, 1}
   defp day(input), do: parse(input, &day/1)
-
-  def parse_months(input) do
-    [input, rest] = String.split(input, " ", parts: 2)
-    months = process(input, &month/1)
-    {:ok, months, rest}
-  end
 
   defp month("*"), do: {1, 12, 1}
   defp month(input), do: parse(input, &month/1)
 
-  def parse_weekdays(input) do
-    [input, rest] = String.split(input, " ", parts: 2)
-    weekdays = process(input, &weekday/1)
-    {:ok, weekdays, rest}
-  end
-
   defp weekday("*"), do: {0, 6, 1}
   defp weekday(input), do: parse(input, &weekday/1)
 
-  def parse_cmd(input) do
-    cmds = process(input, &cmd/1)
-    {:ok, cmds, nil}
+  defp cmd(input), do: {:ok, input, nil}
+
+  ##
+  # Utility functions
+  ##
+  defp is_long?(input) do
+    case input
+         |> String.split(" ", trim: true)
+         |> then(&(length(&1) == 6)) do
+      true -> {:ok, input}
+      false -> {:error, :bad_length, input}
+    end
   end
 
-  defp cmd(input), do: input
-
-  defp validate_input(input) do
+  defp has_valid_tokens?(input) do
     input
     |> String.split(" ", trim: true)
-    |> then(&(length(&1) == 6))
+    |> Enum.take(5)
+    |> Enum.join(" ")
+    |> has_only_allowed_tokens?()
+    |> case do
+      true -> {:ok, input}
+      false -> {:error, :bad_tokens, input}
+    end
+  end
+
+  defp has_only_allowed_tokens?(string) do
+    string
+    |> String.replace(~r/[a-zA-Z!?_+=(){}[\]|&#%@:;$<>.\\^]/, "")
+    |> String.split(" ", trim: true)
+    |> then(&(length(&1) == 5))
   end
 
   defp process(input, parser) do
     input
     |> fragment_input()
-    |> Enum.map(&parser.(&1))
-    |> normalize()
+    |> apply_parser(parser)
+    |> normalize_results()
+  end
+
+  defp apply_parser(input, parser) do
+    Enum.map(input, parser)
   end
 
   defp fragment_input(input) do
-    input
-    |> String.split(",", trim: true)
+    String.split(input, ",", trim: true)
   end
 
+  ##
+  # Main parser
+  ##
   defp parse(input, parser) do
     cond do
       String.contains?(input, "-") ->
@@ -117,9 +152,19 @@ defmodule CronParser do
     end
   end
 
-  defp normalize(lists) do
+  @doc"""
+  Takes individual parser results
+  range [{from, to, step}] :: [{integer(), integer(), integer()}] 
+  cmd   [cmd] :: [String.t()] 
+  And runs expansions on ranges. 
+  Returns results ready for user consumption. 
+  """
+  def normalize_results(lists) do
     lists
-    |> Enum.map(&expand_range/1)
+    |> Enum.map(fn 
+      {_,cmd,nil} -> [cmd] 
+      range -> expand_range(range)
+    end)
     |> Enum.flat_map(& &1)
     |> Enum.uniq()
     |> Enum.sort()
@@ -128,9 +173,15 @@ defmodule CronParser do
   defp expand_range({from, to, step}) do
     Range.to_list(from..to//step)
   end
+
   defp expand_range(input), do: [input]
 
   def pretty_print(input) do
-    input
+    @keys
+    |> Enum.reduce("", fn key, output ->
+      output <>
+        "#{key}#{String.duplicate(" ", 14 - String.length(key))}#{Enum.join(Map.get(input, key), " ")}\n"
+    end)
+    |> IO.puts()
   end
 end
